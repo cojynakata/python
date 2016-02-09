@@ -9,11 +9,11 @@ import sys
 import re
 
 def prompt_sudo():
-    ret = 0
-    if os.geteuid() != 0:
-        msg = "[sudo] password for %u:"
-        ret = subprocess.check_call("sudo -v -p '%s'" % msg, shell=True)
-    return ret
+    euid = os.geteuid()
+    if euid != 0:
+        args = ['sudo', sys.executable] + sys.argv + [os.environ]
+        os.execlpe('sudo', *args)
+    return euid
 
 if prompt_sudo() != 0:
     exit("Sorry, you need to have root privileges to run this script.")
@@ -24,8 +24,14 @@ else:
 #print ("Python version: %s" % sys.version.split('\n'))
 
 def get_pid(process):
-    from subprocess import check_output
-    return check_output(["pidof", process]).split()
+    if sys.version_info < (2,7,0):
+        command = 'pidof ' + process
+        pid = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
+        pid_output = pid.stdout.read().splitlines()
+        return pid_output
+    elif sys.version_info >= (2,7.0):
+        from subprocess import check_output
+        return check_output(["pidof", process]).split()
 
 def os_check():
     global os_platform, os_distro, os_version
@@ -33,7 +39,7 @@ def os_check():
     supported_os_dist_debian = ['LinuxMint', 'debian', 'Ubuntu']
     supported_os_dist_fedora = ['fedora', 'redhat', 'centos', 'Red Hat Enterprise Linux Server']
     supported_os_version_debian = [7, 8, 12, 14, 15, 17]
-    supported_os_version_fedora = [6, 7, 21, 22]
+    supported_os_version_fedora = [6, 7]
     # getting the running OS details
     os_platform = platform.system()
     os_distro = platform.linux_distribution()[0]
@@ -58,7 +64,6 @@ def os_check():
 def webservice_check():
     #can't detect apache running as fast-cgi yet!!
     global webservice_type, webservice_version
-    import subprocess
 
     def check_running_port(service):
         output = []
@@ -72,10 +77,14 @@ def webservice_check():
     def webservice_score(service, port):
     # this function will determine which webservice is in use when multiple ones are running on the server
     # or when the one detected is not running on the ususal 80 and/or 443 port
-        if "0800" or "4433" in port:
-            return 1
-        else:
-            return 0
+        score = 0
+        if "80" in port:
+            score += 1
+        if "443" in port:
+            score += 1
+        if len(port) > 1:
+            score += 1    
+        return score
 
     #defining default package name, conf files location
     if os_platform in ['Linux']:
@@ -132,7 +141,7 @@ def webservice_check():
 
             if len(check_running_port(webservice)) > 0:
                 webservice_score_store[webservice] = webservice_score(webservice, check_running_port(webservice))
-                #print "Webservice %s has a score of %d" % (webservice, webservice_score_store[webservice])
+                print "Webservice %s has a score of %d" % (webservice, webservice_score_store[webservice])
 
         
         # validating results (eg. ensuring that max_score is not a duplicate key)
@@ -151,17 +160,18 @@ def webservice_check():
             return duplicate[0]
 
     else:
-        if len(check_running_port(webservice)) == 0:
+        if len(check_running_port(webservice)) == 0 or check_running_port(webservice)[0].isdigit() == False:
             print "*** Webservice package %s is installed and running but is NOT listening on a TCPv4 port" % (webservice)
         elif len(check_running_port(webservice)) > 1:
             print "*** Webservice package %s is installed and running on ports " % webservice + ' and '.join(map(str,check_running_port(webservice)))
         else:
             print "*** Webservice package %s is installed and running on port " % webservice + ' and '.join(map(str,check_running_port(webservice)))
 
-        if len(check_running_port(webservice)) > 0:
-            webservice_score_store[webservice] = webservice_score(webservice, check_running_port(webservice))
-            print "Webservice %s has a score of %d" % (webservice, webservice_score_store[webservice])
+    if len(check_running_port(webservice)) > 0:
+        webservice_score_store[webservice] = webservice_score(webservice, check_running_port(webservice))
+        print "Webservice %s has a score of %d" % (webservice, webservice_score_store[webservice])
+        return webservice
 
 # Main program
 os_check()
-webservice_check()
+print "You must be using %s" % webservice_check()
