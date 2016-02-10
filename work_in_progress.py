@@ -66,12 +66,14 @@ def webservice_check():
     global webservice_type, webservice_version
 
     def check_running_port(service):
-        output = []
         command = 'netstat -ntlp | grep ' + service + ' | grep -v tcp6'
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
         proc_output = proc.stdout.read().splitlines()
-        for lines in range(len(proc_output)):
-            output.append(proc_output[lines].split()[3].split(':')[1])
+        if len(proc_output) > 0:
+            output = proc_output[0].split()[3].split(':')
+            output = output[len(output) - 1].split()
+        else:
+            output = []
         return output
 
     def webservice_score(service, port):
@@ -114,12 +116,16 @@ def webservice_check():
         print "No webservices installed or detection failed"
         sys.exit()
 
+    webservice_type = None
     current_services = []
     for webservice in webservices_list:
         try:
             null = open("/dev/null", "w")
             pids = get_pid(webservice)
-            current_services.append(webservice)
+            if len(pids) > 0:
+                current_services.append(webservice)
+            else:
+                 print "Webservice package %s is installed but process is NOT running." % webservice
             null.close()
         except:
             print "Webservice package %s is installed but process is NOT running." % webservice
@@ -133,45 +139,47 @@ def webservice_check():
         for webservice in current_services:
             if len(check_running_port(webservice)) == 0:
                 print "*** Webservice package %s is installed and running but is NOT listening on a TCPv4 port" % (webservice)
-            elif len(check_running_port(webservice)) > 1:
-                print "*** Webservice package %s is installed and running on ports " % webservice + ' and '.join(map(str,check_running_port(webservice)))
+            else:
+                if len(check_running_port(webservice)) > 1:
+                    print "*** Webservice package %s is installed and running on ports " % webservice + ' and '.join(map(str,check_running_port(webservice)))
+                else:
+                    print "*** Webservice package %s is installed and running on port " % webservice + ' and '.join(map(str,check_running_port(webservice)))
 
+                if len(check_running_port(webservice)) > 0:
+                    webservice_score_store[webservice] = webservice_score(webservice, check_running_port(webservice))
+                    print "Webservice %s has a score of %d" % (webservice, webservice_score_store[webservice])
+        
+        # validating results (eg. ensuring that max_score is not a duplicate key)
+        max_score = max(webservice_score_store, key=webservice_score_store.get)     
+        duplicate = []
+        for key, value in webservice_score_store.iteritems():
+            if value == webservice_score_store[max_score]:
+                duplicate.append(key)
+
+        if len(duplicate) == 1:
+            webservice_type = duplicate[0]
+
+    else:
+        webservice = current_services[0]
+        if len(check_running_port(webservice)) == 0:
+            print "*** Webservice package %s is installed and running but is NOT listening on a TCPv4 port" % (webservice)
+        else:
+            if len(check_running_port(webservice)) > 1:
+                print "*** Webservice package %s is installed and running on ports " % webservice + ' and '.join(map(str,check_running_port(webservice)))
             else:
                 print "*** Webservice package %s is installed and running on port " % webservice + ' and '.join(map(str,check_running_port(webservice)))
 
             if len(check_running_port(webservice)) > 0:
                 webservice_score_store[webservice] = webservice_score(webservice, check_running_port(webservice))
                 print "Webservice %s has a score of %d" % (webservice, webservice_score_store[webservice])
+                webservice_type = webservice
 
-        
-        # validating results (eg. ensuring that max_score is not a duplicate key)
-        max_score = max(webservice_score_store, key=webservice_score_store.get)
-        
-        duplicate = []
-        for key, value in webservice_score_store.iteritems():
-            if value == webservice_score_store[max_score]:
-                duplicate.append(key)
-
-        if len(duplicate) > 1:
-            print "Could not determine which is the relevant webservice process"
-            sys.exit()
-        else:
-            webservice_type = duplicate[0]
-            return duplicate[0]
-
+    if webservice_type == None:
+        print "Could not determine the relevant webservice process"
+        sys.exit()
     else:
-        if len(check_running_port(webservice)) == 0 or check_running_port(webservice)[0].isdigit() == False:
-            print "*** Webservice package %s is installed and running but is NOT listening on a TCPv4 port" % (webservice)
-        elif len(check_running_port(webservice)) > 1:
-            print "*** Webservice package %s is installed and running on ports " % webservice + ' and '.join(map(str,check_running_port(webservice)))
-        else:
-            print "*** Webservice package %s is installed and running on port " % webservice + ' and '.join(map(str,check_running_port(webservice)))
-
-    if len(check_running_port(webservice)) > 0:
-        webservice_score_store[webservice] = webservice_score(webservice, check_running_port(webservice))
-        print "Webservice %s has a score of %d" % (webservice, webservice_score_store[webservice])
-        return webservice
+        return webservice_type
 
 # Main program
 os_check()
-print "You must be using %s" % webservice_check()
+print "Relevant webservice process is %s" % webservice_check()
